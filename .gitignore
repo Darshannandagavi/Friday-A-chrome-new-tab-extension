@@ -1,0 +1,84 @@
+# ================================
+# Environment & Secrets
+# ================================
+.env
+.env.*
+!.env.example
+
+# API keys / credentials
+*.key
+*.pem
+*.secret
+secrets/
+credentials/
+config.local.js
+
+# ================================
+# Dependencies
+# ================================
+node_modules/
+
+# ================================
+# Build / Distribution
+# ================================
+dist/
+build/
+out/
+release/
+*.zip
+*.crx
+*.xpi
+
+# ================================
+# Logs
+# ================================
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# ================================
+# OS Files
+# ================================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ================================
+# IDE / Editors
+# ================================
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+
+.idea/
+*.swp
+*.swo
+
+# ================================
+# Temporary Files
+# ================================
+tmp/
+temp/
+.cache/
+*.tmp
+*.temp
+
+# ================================
+# Chrome Extension Local Data
+# ================================
+*.local
+*.local.json
+
+# ================================
+# Test / Coverage
+# ================================
+coverage/
+.nyc_output/
+
+# ================================
+# Misc
+# ================================
+*.bak
+*.backup

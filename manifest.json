@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+
+  "name": "Friday New Tab",
+
+  "description": "A premium Gemini-powered productivity dashboard and native voice assistant for Chrome new tabs.",
+
+  "version": "2.1.0",
+
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting"
+  ],
+
+  "host_permissions": [
+    "https://generativelanguage.googleapis.com/*",
+    "https://geocoding-api.open-meteo.com/*",
+    "https://api.open-meteo.com/*",
+    "<all_urls>"
+  ],
+
+  "chrome_url_overrides": {
+    "newtab": "newtab.html"
+  },
+
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com data:; img-src 'self' data: https:; connect-src 'self' https://generativelanguage.googleapis.com wss://generativelanguage.googleapis.com https://geocoding-api.open-meteo.com https://api.open-meteo.com; worker-src 'self';"
+  }
+}

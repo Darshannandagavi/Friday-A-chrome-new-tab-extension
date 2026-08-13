@@ -1,0 +1,39 @@
+/* Local icon fallback for Chrome Web Store package. No remote font/CDN required. */
+.fa-solid,
+.fa-brands {
+  display: inline-grid;
+  place-items: center;
+  width: 1em;
+  height: 1em;
+  font-style: normal;
+  font-weight: 900;
+  line-height: 1;
+}
+.fa-solid::before,
+.fa-brands::before {
+  display: inline-block;
+  line-height: 1;
+}
+.fa-robot::before { content: "🤖"; }
+.fa-moon::before { content: "🌙"; }
+.fa-sun::before { content: "☀️"; }
+.fa-gear::before { content: "⚙️"; }
+.fa-arrow-right::before { content: "➜"; }
+.fa-wand-magic-sparkles::before { content: "✦"; }
+.fa-sparkles::before { content: "✦"; }
+.fa-grip::before { content: "▦"; }
+.fa-bullseye::before { content: "◎"; }
+.fa-note-sticky::before { content: "📝"; }
+.fa-xmark::before { content: "×"; }
+.fa-trash::before { content: "🗑"; }
+.fa-plus::before { content: "+"; }
+.fa-paper-plane::before { content: "➤"; }
+.fa-pen::before { content: "✎"; }
+.fa-check::before { content: "✓"; }
+.fa-palette::before { content: "🎨"; }
+.fa-envelope::before { content: "✉"; }
+.fa-brain::before { content: "🧠"; }
+.fa-youtube::before { content: "▶"; }
+.fa-github::before { content: "{ }"; font-size: .74em; }
+.fa-google-drive::before { content: "△"; }
+.fa-linkedin-in::before { content: "in"; font-size: .72em; font-weight: 950; }
