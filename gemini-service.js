@@ -3,13 +3,46 @@ import { FRIDAY_TOOL_DECLARATIONS, FridayToolManager } from "./friday-tools.js";
 const API_ROOT = "https://generativelanguage.googleapis.com/v1beta";
 
 export const GEMINI_TEXT_MODELS = Object.freeze([
-  { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-  { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+  {
+    value: "gemini-3.6-flash",
+    label: "Gemini 3.6 Flash",
+  },
+  {
+    value: "gemini-3.5-flash",
+    label: "Gemini 3.5 Flash",
+  },
+  {
+    value: "gemini-3.5-flash-lite",
+    label: "Gemini 3.5 Flash Lite",
+  },
 ]);
 
-export const DEFAULT_GEMINI_TEXT_MODEL = GEMINI_TEXT_MODELS[0].value;
+export const DEFAULT_GEMINI_TEXT_MODEL = "gemini-3.6-flash";
 
-const MAX_TOOL_ROUNDS = 4;
+
+
+const MAX_TOOL_ROUNDS = 12;
+const MAX_TOOL_CALLS = 24;
+const MAX_IDENTICAL_TOOL_CALLS = 2;
+const MAX_TOOL_RESULT_CHARS = 18000;
+
+const AGENT_INSTRUCTION = `
+You are Friday operating as an autonomous browser agent when a task requires multiple actions.
+For multi-step goals, do not stop after the first useful tool call. Continue until the user's goal is
+completed, the available evidence is sufficient, or a tool/action is genuinely blocked.
+Use previous tool observations to decide the next action. Preserve useful tab IDs returned by tools and
+pass them into later tools when needed. Prefer reading a page after opening it before making conclusions.
+Do not repeatedly call the same tool with identical arguments. If an action fails, adapt or stop instead
+of blindly retrying. Never claim an action succeeded unless the tool result confirms it.
+When comparing multiple items, collect the required evidence for each item before producing the final comparison.
+For destructive browser actions such as closing tabs, only do them when the user clearly requests them.
+For tasks that require signing in to a website, first try fill_login_form or get_memory to use saved
+credentials. Only ask the user for a username or password when nothing is saved for that site, and save
+whatever they give you with save_memory right away so the same task never needs to ask again.
+If a webpage uses dynamic API calls (like an SPA dashboard), use wait_for_text to wait for specific content to render before reading the page.
+Friday's own chat interface lives inside a browser tab. If a tool call fails because it targeted the
+wrong page, call list_tabs to find the correct tab by URL and retry with its tabId rather than giving up.
+`.trim();
 
 export class GeminiApiError extends Error {
   constructor(message, { status = 0, code = "GEMINI_ERROR", cause } = {}) {
@@ -89,6 +122,7 @@ export class GeminiService {
     this.conversationManager = conversationManager;
     this.controller = null;
     this.toolManager = new FridayToolManager();
+    this.agentRun = null;
   }
 
   abort() {
@@ -246,9 +280,45 @@ export class GeminiService {
     return { text: fullText.trim(), functionCalls, modelParts };
   }
 
+  _limitToolResult(result) {
+    try {
+      const serialized = JSON.stringify(result);
+      if (serialized.length <= MAX_TOOL_RESULT_CHARS) return result;
+
+      if (result && typeof result === "object") {
+        const copy = { ...result };
+        if (typeof copy.text === "string") {
+          const available = Math.max(1000, MAX_TOOL_RESULT_CHARS - 500);
+          copy.text = `${copy.text.slice(0, available)}\n\n[Tool result truncated for the next agent step.]`;
+          return copy;
+        }
+      }
+
+      return {
+        success: true,
+        truncated: true,
+        summary: serialized.slice(0, MAX_TOOL_RESULT_CHARS),
+      };
+    } catch {
+      return {
+        success: false,
+        error: "Tool returned an unserializable result.",
+      };
+    }
+  }
+
   async streamText(
     message,
-    { messages = [], onToken, onDone, onToolStart, onToolEnd } = {},
+    {
+      messages = [],
+      onToken,
+      onDone,
+      onToolStart,
+      onToolEnd,
+      onAgentStart,
+      onAgentStep,
+      onAgentEnd,
+    } = {},
   ) {
     const config = this.getConfig();
 
@@ -282,12 +352,12 @@ export class GeminiService {
     const systemInstruction = {
       parts: [
         {
-          text: this.promptBuilder.build({
+          text: `${this.promptBuilder.build({
             userName: config.userName,
             personality: config.personality,
             customPersonalities: config.customPersonalities,
             mode: "text",
-          }),
+          })}\n\n${AGENT_INSTRUCTION}`,
         },
       ],
     };
@@ -307,71 +377,168 @@ export class GeminiService {
       keys.length - 1,
     );
     let finalText = "";
+    let totalToolCalls = 0;
+    let completedRounds = 0;
+    const toolCallHistory = new Map();
 
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
-      const body = {
-        systemInstruction,
-        contents,
-        generationConfig,
-        tools: [{ functionDeclarations: FRIDAY_TOOL_DECLARATIONS }],
-      };
+    this.agentRun = {
+      startedAt: Date.now(),
+      rounds: 0,
+      toolCalls: 0,
+      status: "running",
+    };
 
-      const { response, activeIndex: usedIndex } = await this._requestStream({
-        endpoint,
-        keys,
-        startIndex: activeIndex,
-        body,
-      });
-      activeIndex = usedIndex;
+    await onAgentStart?.({
+      maxRounds: MAX_TOOL_ROUNDS,
+      maxToolCalls: MAX_TOOL_CALLS,
+    });
 
-      const { text, functionCalls, modelParts } = await this._consumeStream(
-        response,
-        { onToken },
-      );
+    try {
+      for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
+        completedRounds = round + 1;
+        this.agentRun.rounds = completedRounds;
 
-      if (!functionCalls.length) {
-        finalText = text;
-        break;
-      }
+        await onAgentStep?.({
+          type: "thinking",
+          round: completedRounds,
+          maxRounds: MAX_TOOL_ROUNDS,
+          toolCalls: totalToolCalls,
+          message:
+            round === 0
+              ? "Planning the task..."
+              : `Evaluating the latest result and choosing the next action...`,
+        });
 
-      // Model wants to call one or more tools. Record its turn, execute
-      // the tools locally, then feed the results back for a follow-up turn.
-      contents.push({
-        role: "model",
-        parts: modelParts.length
-          ? modelParts
-          : functionCalls.map((call) => ({ functionCall: call })),
-      });
+        const body = {
+          systemInstruction,
+          contents,
+          generationConfig,
+          tools: [{ functionDeclarations: FRIDAY_TOOL_DECLARATIONS }],
+        };
 
-      const functionResponseParts = [];
+        const { response, activeIndex: usedIndex } = await this._requestStream({
+          endpoint,
+          keys,
+          startIndex: activeIndex,
+          body,
+        });
+        activeIndex = usedIndex;
 
-      for (const call of functionCalls) {
-        const name = String(call?.name || "").trim();
-        const args =
-          call?.args && typeof call.args === "object" ? call.args : {};
+        const { text, functionCalls, modelParts } = await this._consumeStream(
+          response,
+          { onToken },
+        );
 
-        await onToolStart?.(name, args);
-
-        try {
-          if (!this.toolManager.has(name)) {
-            throw new Error(`Friday does not have a tool named "${name}".`);
-          }
-          const result = await this.toolManager.execute(name, args);
-          functionResponseParts.push({
-            functionResponse: { name, response: { result } },
-          });
-          await onToolEnd?.(name, result);
-        } catch (error) {
-          const errorMessage =
-            error?.message || String(error) || "Tool execution failed.";
-          functionResponseParts.push({
-            functionResponse: { name, response: { error: errorMessage } },
-          });
-          await onToolEnd?.(name, { success: false, error: errorMessage });
+        if (!functionCalls.length) {
+          finalText = text;
+          break;
         }
-      }
 
-      contents.push({ role: "function", parts: functionResponseParts });
+        contents.push({
+          role: "model",
+          parts: modelParts.length
+            ? modelParts
+            : functionCalls.map((call) => ({ functionCall: call })),
+        });
+
+        const functionResponseParts = [];
+
+        for (const call of functionCalls) {
+          if (totalToolCalls >= MAX_TOOL_CALLS) {
+            throw new GeminiApiError(
+              `Friday reached its safety limit of ${MAX_TOOL_CALLS} browser actions for this task.`,
+              { code: "AGENT_ACTION_LIMIT" },
+            );
+          }
+
+          const name = String(call?.name || "").trim();
+          const args =
+            call?.args && typeof call.args === "object" ? call.args : {};
+          const signature = `${name}:${JSON.stringify(args)}`;
+          const previousCount = toolCallHistory.get(signature) || 0;
+
+          if (previousCount >= MAX_IDENTICAL_TOOL_CALLS) {
+            const result = {
+              success: false,
+              error:
+                "Friday blocked this repeated action because the same tool call was already attempted multiple times.",
+            };
+            functionResponseParts.push({
+              functionResponse: { name, response: { result } },
+            });
+            await onToolEnd?.(name, result);
+            continue;
+          }
+
+          toolCallHistory.set(signature, previousCount + 1);
+          totalToolCalls += 1;
+          this.agentRun.toolCalls = totalToolCalls;
+
+          await onAgentStep?.({
+            type: "tool",
+            round: completedRounds,
+            toolCalls: totalToolCalls,
+            toolName: name,
+            args,
+            message: `Running ${name.replaceAll("_", " ")}...`,
+          });
+          await onToolStart?.(name, args);
+
+          try {
+            if (!this.toolManager.has(name)) {
+              throw new Error(`Friday does not have a tool named "${name}".`);
+            }
+
+            const result = await this.toolManager.execute(name, args);
+            const safeResult = this._limitToolResult(result);
+
+            functionResponseParts.push({
+              functionResponse: { name, response: { result: safeResult } },
+            });
+            await onToolEnd?.(name, result);
+
+            await onAgentStep?.({
+              type: "observation",
+              round: completedRounds,
+              toolCalls: totalToolCalls,
+              toolName: name,
+              result: safeResult,
+              message: `${name.replaceAll("_", " ")} completed.`,
+            });
+          } catch (error) {
+            const errorMessage =
+              error?.message || String(error) || "Tool execution failed.";
+            const result = { success: false, error: errorMessage };
+
+            functionResponseParts.push({
+              functionResponse: { name, response: { result } },
+            });
+            await onToolEnd?.(name, result);
+
+            await onAgentStep?.({
+              type: "observation",
+              round: completedRounds,
+              toolCalls: totalToolCalls,
+              toolName: name,
+              result,
+              message: `${name.replaceAll("_", " ")} failed: ${errorMessage}`,
+            });
+          }
+        }
+
+        contents.push({ role: "user", parts: functionResponseParts });
+      }
+    } finally {
+      if (this.agentRun) {
+        this.agentRun.status = finalText ? "completed" : "stopped";
+        this.agentRun.finishedAt = Date.now();
+      }
+      await onAgentEnd?.({
+        status: finalText ? "completed" : "stopped",
+        rounds: completedRounds,
+        toolCalls: totalToolCalls,
+      });
+      this.agentRun = null;
     }
 
     this.controller = null;

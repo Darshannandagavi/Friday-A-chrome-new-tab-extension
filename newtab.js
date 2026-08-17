@@ -11,7 +11,7 @@ import {
   GEMINI_AUTO_VOICE,
   resolveGeminiVoice,
 } from "./gemini-voice.js";
-
+import { FridayMemory } from "./friday-memory.js";
 function makeId() {
   if (
     typeof crypto !== "undefined" &&
@@ -194,6 +194,7 @@ const elements = {
   personalityPrompt: $("#personalityPrompt"),
   cancelPersonality: $("#cancelPersonality"),
   savePersonality: $("#savePersonality"),
+  savedMemoryList: $("#savedMemoryList"),
   accentRow: $("#accentRow"),
   customAccentColor: $("#customAccentColor"),
   customAccentValue: $("#customAccentValue"),
@@ -208,6 +209,15 @@ function getChromeStorage() {
 
 function mergeState(base, saved = {}) {
   const savedGemini = saved.gemini || {};
+
+  // If the saved model is deprecated/unsupported for new keys, fallback to base default
+  const savedModel =
+    typeof savedGemini.model === "string" ? savedGemini.model : "";
+  const isDeprecatedModel =
+    /^models\/?gemini-2\.5-flash$/i.test(savedModel) ||
+    savedModel === "gemini-2.5-flash";
+  const resolvedModel =
+    isDeprecatedModel || !savedModel ? base.gemini.model : savedModel;
 
   return {
     name: typeof saved.name === "string" ? saved.name : base.name,
@@ -233,10 +243,7 @@ function mergeState(base, saved = {}) {
           ? [savedGemini.apiKey]
           : [],
       activeApiKeyIndex: 0,
-      model:
-        typeof savedGemini.model === "string"
-          ? savedGemini.model
-          : base.gemini.model,
+      model: resolvedModel, // <-- Uses sanitized model
       voice:
         typeof savedGemini.voice === "string"
           ? savedGemini.voice
@@ -516,7 +523,29 @@ function renderPersonalities() {
     elements.personalityList.appendChild(row);
   });
 }
+async function renderSavedMemory() {
+  if (!elements.savedMemoryList) return;
+  const records = await FridayMemory.listRecords();
+  elements.savedMemoryList.innerHTML = "";
 
+  if (!records.length) {
+    elements.savedMemoryList.innerHTML = `<div class="empty-state">Nothing saved yet.</div>`;
+    return;
+  }
+
+  records.forEach((record) => {
+    const row = document.createElement("div");
+    row.className = "personality-row";
+    row.innerHTML = `<span><strong></strong><small></small></span><button type="button" aria-label="Forget saved login">×</button>`;
+    row.querySelector("strong").textContent = record.site;
+    row.querySelector("small").textContent = record.fields.join(", ");
+    row.querySelector("button").addEventListener("click", async () => {
+      await FridayMemory.deleteRecord(record.site);
+      renderSavedMemory();
+    });
+    elements.savedMemoryList.appendChild(row);
+  });
+}
 function renderSettings() {
   elements.nameInput.value = state.name;
   elements.defaultEngine.value = state.defaultEngine;
@@ -804,6 +833,7 @@ function openSettings() {
   elements.settingsDrawer.inert = false;
   elements.settingsDrawer.classList.add("open");
   elements.drawerScrim.classList.add("open");
+  renderSavedMemory().catch(console.error);
 
   setTimeout(() => {
     elements.nameInput.focus();
@@ -1026,6 +1056,49 @@ async function sendChatMessage(message) {
         clearToolStatus();
         responseText = fullText;
         assistantMessage.content = fullText;
+        renderChat();
+      },
+      onAgentStart: ({ maxRounds, maxToolCalls } = {}) => {
+        clearToolStatus();
+        toolStatusMessage = {
+          role: "assistant",
+          content: `Planning task... (up to ${maxRounds || 12} steps)`,
+          kind: "status",
+        };
+        const assistantIndex = state.chat.indexOf(assistantMessage);
+        if (assistantIndex >= 0) {
+          state.chat.splice(assistantIndex, 0, toolStatusMessage);
+        } else {
+          state.chat.push(toolStatusMessage);
+        }
+        renderChat();
+      },
+      onAgentStep: ({ type, message, round, toolCalls } = {}) => {
+        if (!message) return;
+        if (!toolStatusMessage) {
+          toolStatusMessage = {
+            role: "assistant",
+            content: "",
+            kind: "status",
+          };
+          const assistantIndex = state.chat.indexOf(assistantMessage);
+          state.chat.splice(
+            assistantIndex >= 0 ? assistantIndex : state.chat.length,
+            0,
+            toolStatusMessage,
+          );
+        }
+        const prefix =
+          type === "tool"
+            ? "Action"
+            : type === "observation"
+              ? "Result"
+              : "Step";
+        toolStatusMessage.content = `${prefix} ${round || 1}${toolCalls ? ` · ${toolCalls} action${toolCalls === 1 ? "" : "s"}` : ""}: ${message}`;
+        renderChat();
+      },
+      onAgentEnd: () => {
+        clearToolStatus();
         renderChat();
       },
       onToolStart: (toolName) => {
@@ -1586,9 +1659,11 @@ function attachEvents() {
 
     geminiService.abort();
     await stopVoiceAssistant();
+    await FridayMemory.clearAll();
     state = clone(defaultState);
     await saveState();
     renderAll();
+    renderSavedMemory().catch(console.error);
     closeSettings();
   });
 }

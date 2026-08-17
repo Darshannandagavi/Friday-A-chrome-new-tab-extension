@@ -1,5 +1,6 @@
 // friday-tools.js
-
+// friday-tools.js
+import { FridayMemory, normalizeSiteKey } from "./friday-memory.js";
 const OPEN_METEO_GEOCODING = "https://geocoding-api.open-meteo.com/v1/search";
 
 const OPEN_METEO_FORECAST = "https://api.open-meteo.com/v1/forecast";
@@ -125,6 +126,169 @@ export const FRIDAY_TOOL_DECLARATIONS = Object.freeze([
   },
 
   {
+    name: "wait_for_tab",
+    description:
+      "Wait for a Chrome tab to finish loading and return its current title and URL. Use after opening a page before reading it when the page may still be loading.",
+    parameters: {
+      type: "object",
+      properties: {
+        tabId: { type: "integer", description: "Chrome tab ID to wait for." },
+        timeoutMs: {
+          type: "integer",
+          description: "Maximum wait time in milliseconds. Defaults to 10000.",
+        },
+      },
+      required: ["tabId"],
+    },
+  },
+
+  {
+    name: "get_tab_info",
+    description:
+      "Get the current title, URL, loading status, and basic metadata for a Chrome tab.",
+    parameters: {
+      type: "object",
+      properties: {
+        tabId: { type: "integer", description: "Optional Chrome tab ID." },
+      },
+    },
+  },
+
+  {
+    name: "click_page_link",
+
+    description:
+      "Click a visible link or button on a webpage by matching its text. Use this to continue navigating a page when a direct URL is not available.",
+    parameters: {
+      type: "object",
+      properties: {
+        tabId: {
+          type: "integer",
+          description: "Optional Chrome tab ID. Defaults to the active tab.",
+        },
+        text: {
+          type: "string",
+          description: "Visible link or button text to click.",
+        },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "fill_login_form",
+    description:
+      "Fill a login form on the current page using previously saved credentials (see save_memory). Never asks for or receives the raw password from the model - it is read directly from memory and typed into the page. Handles both single-step forms and progressive (email-first, then password) login flows automatically. Returns missingCredentials: true if nothing is saved yet for this site. Returns advancedToNextStep: true if the site only asks for an email first and the password field has not rendered yet - in that case call wait_for_tab briefly, then call fill_login_form again to fill the password once it appears.",
+    parameters: {
+      type: "object",
+      properties: {
+        tabId: {
+          type: "integer",
+          description: "Optional Chrome tab ID. Defaults to the active tab.",
+        },
+        site: {
+          type: "string",
+          description:
+            "Optional site domain to look up (e.g. liganddevelopers.vercel.app). Defaults to the current tab's hostname.",
+        },
+        submit: {
+          type: "boolean",
+          description:
+            "If true, submit the form immediately after filling it. Defaults to false.",
+        },
+      },
+    },
+  },
+
+  {
+    name: "fill_input",
+    description:
+      "Type a value into a text-like form field on the current page, matched by its label, placeholder, name, or aria-label. Use this for search boxes, signup fields, or any non-password input. Do not use this for password fields - use fill_login_form with save_memory instead.",
+    parameters: {
+      type: "object",
+      properties: {
+        tabId: {
+          type: "integer",
+          description: "Optional Chrome tab ID. Defaults to the active tab.",
+        },
+        fieldLabel: {
+          type: "string",
+          description:
+            "Text identifying the field - its visible label, placeholder, or name attribute.",
+        },
+        value: {
+          type: "string",
+          description: "The text to type into the field.",
+        },
+      },
+      required: ["fieldLabel", "value"],
+    },
+  },
+
+  {
+    name: "save_memory",
+    description:
+      "Permanently remember a piece of reusable information, such as a login username, email, password, or PIN, for a specific site or service, so the user never has to repeat it. Call this immediately whenever the user shares login details or similar credentials in conversation, even if they did not explicitly ask you to remember it. Use the site's exact domain as the site value (e.g. liganddevelopers.vercel.app), matching the current tab's hostname when the user is already on that site.",
+    parameters: {
+      type: "object",
+      properties: {
+        site: {
+          type: "string",
+          description:
+            "The domain or service name this belongs to, e.g. liganddevelopers.vercel.app.",
+        },
+        field: {
+          type: "string",
+          description:
+            "What kind of value this is, e.g. username, email, password, or pin.",
+        },
+        value: { type: "string", description: "The value to remember." },
+      },
+      required: ["site", "field", "value"],
+    },
+  },
+
+  {
+    name: "get_memory",
+    description:
+      "Check what information is already saved for a site or service before asking the user for it again. Returns which fields are saved (e.g. username, password) without exposing their values.",
+    parameters: {
+      type: "object",
+      properties: {
+        site: {
+          type: "string",
+          description:
+            "The domain or service name to look up, e.g. liganddevelopers.vercel.app.",
+        },
+      },
+      required: ["site"],
+    },
+  },
+
+  {
+    name: "forget_memory",
+    description:
+      "Delete previously saved information for a site or service, for example if the user's password changed or they ask Friday to forget it.",
+    parameters: {
+      type: "object",
+      properties: {
+        site: {
+          type: "string",
+          description:
+            "The domain or service name to forget, e.g. liganddevelopers.vercel.app.",
+        },
+      },
+      required: ["site"],
+    },
+  },
+
+  {
+    name: "list_saved_sites",
+    description:
+      "List the sites or services Friday currently has saved information for, without revealing the values. Use this if the user asks what you remember.",
+    parameters: { type: "object", properties: {} },
+  },
+
+  {
     name: "calculator",
     description:
       "Perform a mathematical calculation accurately. Use this instead of doing arithmetic mentally.",
@@ -203,6 +367,30 @@ export const FRIDAY_TOOL_DECLARATIONS = Object.freeze([
         },
       },
       required: ["url"],
+    },
+  },
+  {
+    name: "wait_for_text",
+    description:
+      "Wait for specific text to appear on a webpage. Use this to wait for asynchronous API calls or dynamic SPA content to load before reading the page.",
+    parameters: {
+      type: "object",
+      properties: {
+        tabId: {
+          type: "integer",
+          description: "Optional Chrome tab ID. Defaults to the active tab.",
+        },
+        text: {
+          type: "string",
+          description:
+            "The visible text to wait for (e.g., 'Dashboard' or 'Students').",
+        },
+        timeoutMs: {
+          type: "integer",
+          description: "Maximum wait time in milliseconds. Defaults to 10000.",
+        },
+      },
+      required: ["text"],
     },
   },
 ]);
@@ -545,9 +733,532 @@ async function readPage({ tabId, maxCharacters = 12000 } = {}) {
 
 /*
  * ============================================================================
+ * TAB WAIT / INFO / CLICK
+ * ============================================================================
+ */
+
+async function getTabByIdOrActive(tabId) {
+  ensureChromeApi();
+  const requested = Number(tabId);
+  if (Number.isInteger(requested)) {
+    const tabs = await chrome.tabs.query({});
+    const tab = tabs.find((item) => item.id === requested);
+    if (!tab) throw new Error("The requested Chrome tab no longer exists.");
+    return tab;
+  }
+  return getActiveTab();
+}
+
+async function getTabInfo({ tabId } = {}) {
+  const tab = await getTabByIdOrActive(tabId);
+  return {
+    success: true,
+    action: "get_tab_info",
+    tabId: tab.id,
+    windowId: tab.windowId,
+    title: tab.title || "",
+    url: tab.url || "",
+    status: tab.status || "unknown",
+    active: Boolean(tab.active),
+  };
+}
+
+async function waitForTab({ tabId, timeoutMs = 10000 } = {}) {
+  ensureChromeApi();
+  const requested = Number(tabId);
+  if (!Number.isInteger(requested))
+    throw new Error("A valid tabId is required.");
+
+  const timeout = Math.max(1000, Math.min(Number(timeoutMs) || 10000, 20000));
+  const started = Date.now();
+
+  while (Date.now() - started < timeout) {
+    const tabs = await chrome.tabs.query({});
+    const tab = tabs.find((item) => item.id === requested);
+    if (!tab) throw new Error("The requested Chrome tab no longer exists.");
+
+    if (tab.status === "complete") {
+      return {
+        success: true,
+        action: "wait_for_tab",
+        tabId: tab.id,
+        title: tab.title || "",
+        url: tab.url || "",
+        status: tab.status,
+        waitedMs: Date.now() - started,
+      };
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+
+  const tab = await getTabByIdOrActive(requested);
+  return {
+    success: true,
+    action: "wait_for_tab",
+    tabId: tab.id,
+    title: tab.title || "",
+    url: tab.url || "",
+    status: tab.status || "loading",
+    timedOut: true,
+    waitedMs: Date.now() - started,
+  };
+}
+
+async function clickPageLink({ tabId, text } = {}) {
+  ensureChromeApi();
+  const targetTabId = Number.isInteger(Number(tabId))
+    ? Number(tabId)
+    : (await getActiveTab()).id;
+  const cleanText = String(text || "").trim();
+  if (!cleanText) throw new Error("Link or button text is required.");
+
+  const pageUrl = String((await getTabByIdOrActive(targetTabId)).url || "");
+  if (
+    /^(chrome|chrome-extension|edge|about|devtools|view-source):/i.test(pageUrl)
+  ) {
+    throw new Error(
+      "Chrome does not allow Friday to interact with this protected page.",
+    );
+  }
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: targetTabId },
+    args: [cleanText],
+    func: (needle) => {
+      const normalize = (value) =>
+        String(value || "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .toLowerCase();
+      const wanted = normalize(needle);
+      const candidates = Array.from(
+        document.querySelectorAll(
+          'a,button,[role="button"],input[type="submit"],input[type="button"]',
+        ),
+      );
+      const match = candidates.find((element) => {
+        const label = normalize(
+          element.innerText ||
+            element.textContent ||
+            element.getAttribute("aria-label") ||
+            element.value,
+        );
+        return label === wanted || label.includes(wanted);
+      });
+
+      if (!match)
+        return {
+          success: false,
+          error: `No visible link or button matched "${needle}".`,
+        };
+
+      match.scrollIntoView({ block: "center", behavior: "instant" });
+      match.click();
+      return {
+        success: true,
+        text: match.innerText || match.textContent || needle,
+      };
+    },
+  });
+
+  const result = results?.[0]?.result;
+  if (!result?.success)
+    throw new Error(result?.error || "Could not click the requested link.");
+
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  const tab = await getTabByIdOrActive(targetTabId);
+
+  return {
+    success: true,
+    action: "click_page_link",
+    tabId: targetTabId,
+    clickedText: result.text,
+    title: tab.title || "",
+    url: tab.url || "",
+  };
+}
+
+/*
+ * ============================================================================
  * CALCULATOR
  * ============================================================================
  */
+/*
+ * ============================================================================
+ * LOGIN FORM FILL
+ * ============================================================================
+ */
+
+/*
+ * ============================================================================
+ * LOGIN FORM FILL
+ * ============================================================================
+ */
+
+async function fillLoginForm({ tabId, site, submit = false } = {}) {
+  ensureChromeApi();
+
+  const targetTabId = Number.isInteger(Number(tabId)) ? Number(tabId) : (await getActiveTab()).id;
+  const tab = await getTabByIdOrActive(targetTabId);
+  const pageUrl = String(tab.url || "");
+
+  if (/^(chrome|chrome-extension|edge|about|devtools|view-source):/i.test(pageUrl)) {
+    throw new Error("Chrome does not allow Friday to interact with this protected page.");
+  }
+
+  let hostname = "";
+  try {
+    hostname = new URL(pageUrl).hostname.replace(/^www\./, "");
+  } catch {}
+
+  if (site) {
+    const requestedSite = normalizeSiteKey(site);
+    if (requestedSite && hostname && !hostname.includes(requestedSite) && !requestedSite.includes(hostname)) {
+      throw new Error(
+        `The current tab is on "${hostname}", not "${requestedSite}". Use open_tab or switch_tab to go to ${requestedSite} first, then retry fill_login_form.`,
+      );
+    }
+  }
+
+  const lookupSite = String(site || hostname || "").trim();
+  if (!lookupSite) {
+    throw new Error("Could not determine which site to look up saved credentials for.");
+  }
+
+  const record = await FridayMemory.getRecord(lookupSite);
+  const username = record?.username || record?.email || "";
+  const password = record?.password || "";
+
+  if (!password) {
+    return {
+      success: false,
+      action: "fill_login_form",
+      site: lookupSite,
+      missingCredentials: true,
+      message: `No saved password for "${lookupSite}". Ask the user for their login email/username and password, save it with save_memory, then call fill_login_form again.`,
+    };
+  }
+
+  const attempt = async () => {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: targetTabId },
+      args: [{ username, password, submit: Boolean(submit) }],
+      func: ({ username, password, submit }) => {
+        function setNativeValue(el, value) {
+          const proto =
+            el instanceof HTMLTextAreaElement
+              ? window.HTMLTextAreaElement.prototype
+              : window.HTMLInputElement.prototype;
+          const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+          if (setter) setter.call(el, value);
+          else el.value = value;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+
+        const isVisible = (el) => el.offsetParent !== null || el.getClientRects().length > 0;
+
+        const passwordField = Array.from(document.querySelectorAll('input[type="password"]')).find(isVisible);
+
+        const usernameSelectors = [
+          'input[type="email"]',
+          'input[autocomplete="username"]',
+          'input[autocomplete="email"]',
+          'input[name*="email" i]',
+          'input[name*="user" i]',
+          'input[id*="email" i]',
+          'input[id*="user" i]',
+          'input[placeholder*="email" i]',
+          'input[placeholder*="username" i]',
+          'input[type="text"]',
+        ];
+
+        function findUsernameField(scope) {
+          for (const selector of usernameSelectors) {
+            const field = Array.from(scope.querySelectorAll(selector)).find(
+              (el) => el.type !== "password" && isVisible(el),
+            );
+            if (field) return field;
+          }
+          return null;
+        }
+
+        // ---- Case 1: password field is already on the page (single-step form) ----
+        if (passwordField) {
+          const scope = passwordField.closest("form") || document;
+          const usernameField = findUsernameField(scope);
+
+          if (usernameField && username) setNativeValue(usernameField, username);
+          setNativeValue(passwordField, password);
+
+          let submitted = false;
+          if (submit) {
+            const form = passwordField.closest("form");
+            if (form && typeof form.requestSubmit === "function") {
+              form.requestSubmit();
+              submitted = true;
+            } else if (form) {
+              form.submit();
+              submitted = true;
+            } else {
+              const submitControl = document.querySelector('button[type="submit"], input[type="submit"]');
+              if (submitControl) {
+                submitControl.click();
+                submitted = true;
+              }
+            }
+          }
+
+          return {
+            stage: "password_filled",
+            usernameFilled: Boolean(usernameField && username),
+            passwordFilled: true,
+            submitted,
+          };
+        }
+
+        // ---- Case 2: no password field yet - likely a progressive (email-first) flow ----
+        const usernameField = findUsernameField(document);
+        if (!usernameField) {
+          return { stage: "no_fields", error: "No visible email/username or password field was found on this page." };
+        }
+
+        setNativeValue(usernameField, username);
+
+        const buttonWords = ["continue", "next", "sign in", "log in", "login"];
+        const clickable = Array.from(document.querySelectorAll('button,[role="button"],input[type="submit"]'));
+        const advanceButton = clickable.find((el) => {
+          const label = (el.innerText || el.textContent || el.value || "").trim().toLowerCase();
+          return label && buttonWords.some((word) => label.includes(word)) && isVisible(el);
+        });
+
+        if (advanceButton) advanceButton.click();
+
+        return { stage: "advanced_step", usernameFilled: true, clickedAdvance: Boolean(advanceButton) };
+      },
+    });
+
+    return results?.[0]?.result;
+  };
+
+  let result = await attempt();
+
+  // Give a progressive form time to render its password step, then try again once.
+  if (result?.stage === "advanced_step") {
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    result = await attempt();
+  }
+
+  if (!result || result.stage === "no_fields") {
+    throw new Error(result?.error || "Could not find a login form on this page.");
+  }
+
+  if (result.stage === "advanced_step") {
+    return {
+      success: false,
+      action: "fill_login_form",
+      tabId: targetTabId,
+      site: lookupSite,
+      advancedToNextStep: true,
+      message:
+        "This site uses a multi-step login (email first, then password). Filled the email and advanced to the next step, but the password field still hasn't appeared. Call wait_for_tab briefly, then call fill_login_form again.",
+    };
+  }
+
+  return {
+    success: true,
+    action: "fill_login_form",
+    tabId: targetTabId,
+    site: lookupSite,
+    usernameFilled: result.usernameFilled,
+    passwordFilled: result.passwordFilled,
+    submitted: result.submitted,
+    message: result.submitted
+      ? "Filled and submitted the login form using saved credentials."
+      : "Filled the login form using saved credentials. Call fill_login_form again with submit: true, or click_page_link, to log in.",
+  };
+}
+
+/*
+ * ============================================================================
+ * GENERIC INPUT FILL
+ * ============================================================================
+ */
+
+async function fillInput({ tabId, fieldLabel, value } = {}) {
+  ensureChromeApi();
+
+  const targetTabId = Number.isInteger(Number(tabId))
+    ? Number(tabId)
+    : (await getActiveTab()).id;
+  const cleanLabel = String(fieldLabel || "").trim();
+  if (!cleanLabel)
+    throw new Error(
+      "A fieldLabel is required to identify which field to fill.",
+    );
+  if (value === undefined || value === null)
+    throw new Error("A value is required.");
+
+  const pageUrl = String((await getTabByIdOrActive(targetTabId)).url || "");
+  if (
+    /^(chrome|chrome-extension|edge|about|devtools|view-source):/i.test(pageUrl)
+  ) {
+    throw new Error(
+      "Chrome does not allow Friday to interact with this protected page.",
+    );
+  }
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: targetTabId },
+    args: [cleanLabel, String(value)],
+    func: (needle, fillValue) => {
+      const normalize = (v) =>
+        String(v || "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .toLowerCase();
+      const wanted = normalize(needle);
+
+      function labelFor(input) {
+        if (input.labels && input.labels.length)
+          return input.labels[0].innerText || input.labels[0].textContent;
+        if (input.getAttribute("aria-label"))
+          return input.getAttribute("aria-label");
+        if (input.placeholder) return input.placeholder;
+        if (input.id) {
+          const byFor = document.querySelector(`label[for="${input.id}"]`);
+          if (byFor) return byFor.innerText || byFor.textContent;
+        }
+        return input.name || "";
+      }
+
+      const candidates = Array.from(
+        document.querySelectorAll("input,textarea"),
+      ).filter((el) => {
+        const type = (el.getAttribute("type") || "text").toLowerCase();
+        return ![
+          "password",
+          "hidden",
+          "checkbox",
+          "radio",
+          "submit",
+          "button",
+          "file",
+          "image",
+          "reset",
+        ].includes(type);
+      });
+
+      const match = candidates.find((el) =>
+        normalize(labelFor(el)).includes(wanted),
+      );
+      if (!match)
+        return {
+          success: false,
+          error: `No matching input field found for "${needle}".`,
+        };
+
+      match.focus();
+      const proto =
+        match instanceof HTMLTextAreaElement
+          ? window.HTMLTextAreaElement.prototype
+          : window.HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+      if (setter) setter.call(match, fillValue);
+      else match.value = fillValue;
+      match.dispatchEvent(new Event("input", { bubbles: true }));
+      match.dispatchEvent(new Event("change", { bubbles: true }));
+
+      return { success: true, label: labelFor(match) || needle };
+    },
+  });
+
+  const result = results?.[0]?.result;
+  if (!result?.success)
+    throw new Error(result?.error || "Could not fill the requested field.");
+
+  return {
+    success: true,
+    action: "fill_input",
+    tabId: targetTabId,
+    fieldLabel: cleanLabel,
+    filledLabel: result.label,
+  };
+}
+
+/*
+ * ============================================================================
+ * MEMORY (credentials & reusable facts)
+ * ============================================================================
+ */
+
+async function saveMemory({ site, field, value } = {}) {
+  const cleanSite = String(site || "").trim();
+  const cleanField = String(field || "")
+    .trim()
+    .toLowerCase();
+  if (!cleanSite) throw new Error("A site is required.");
+  if (!cleanField) throw new Error("A field name is required.");
+  if (value === undefined || value === null || String(value).trim() === "") {
+    throw new Error("A value is required.");
+  }
+
+  await FridayMemory.saveField(cleanSite, cleanField, String(value));
+
+  return {
+    success: true,
+    action: "save_memory",
+    site: cleanSite,
+    field: cleanField,
+    message: `Saved ${cleanField} for ${cleanSite}.`,
+  };
+}
+
+async function getMemory({ site } = {}) {
+  const cleanSite = String(site || "").trim();
+  if (!cleanSite) throw new Error("A site is required.");
+
+  const record = await FridayMemory.getRecord(cleanSite);
+  if (!record)
+    return {
+      success: true,
+      action: "get_memory",
+      site: cleanSite,
+      found: false,
+    };
+
+  const fields = Object.keys(record).filter((key) => key !== "updatedAt");
+  return {
+    success: true,
+    action: "get_memory",
+    site: cleanSite,
+    found: fields.length > 0,
+    fields,
+  };
+}
+
+async function forgetMemory({ site } = {}) {
+  const cleanSite = String(site || "").trim();
+  if (!cleanSite) throw new Error("A site is required.");
+
+  const removed = await FridayMemory.deleteRecord(cleanSite);
+
+  return {
+    success: true,
+    action: "forget_memory",
+    site: cleanSite,
+    removed,
+    message: removed
+      ? `Forgot saved information for ${cleanSite}.`
+      : `Nothing was saved for ${cleanSite}.`,
+  };
+}
+
+async function listSavedSites() {
+  const sites = await FridayMemory.listSites();
+  return { success: true, action: "list_saved_sites", sites };
+}
 
 function calculate({ expression } = {}) {
   const rawExpression = String(expression || "").trim();
@@ -831,6 +1542,63 @@ async function getWeather({ location } = {}) {
 
 /*
  * ============================================================================
+ * WAIT FOR TEXT (Dynamic Content)
+ * ============================================================================
+ */
+
+async function waitForText({ tabId, text, timeoutMs = 10000 } = {}) {
+  ensureChromeApi();
+  const targetTabId = Number.isInteger(Number(tabId))
+    ? Number(tabId)
+    : (await getActiveTab()).id;
+  const cleanText = String(text || "").trim().toLowerCase();
+  
+  if (!cleanText) {
+    throw new Error("Text to wait for is required.");
+  }
+
+  const timeout = Math.max(1000, Math.min(Number(timeoutMs) || 10000, 20000));
+  const started = Date.now();
+
+  while (Date.now() - started < timeout) {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: targetTabId },
+      func: () => document.body?.innerText?.toLowerCase() || "",
+    });
+    
+    const pageText = results?.[0]?.result || "";
+    
+    if (pageText.includes(cleanText)) {
+      const tab = await getTabByIdOrActive(targetTabId);
+      return {
+        success: true,
+        action: "wait_for_text",
+        tabId: targetTabId,
+        title: tab.title || "",
+        url: tab.url || "",
+        found: true,
+        waitedMs: Date.now() - started,
+      };
+    }
+    
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  const tab = await getTabByIdOrActive(targetTabId);
+  return {
+    success: false,
+    action: "wait_for_text",
+    tabId: targetTabId,
+    title: tab.title || "",
+    url: tab.url || "",
+    found: false,
+    timedOut: true,
+    waitedMs: Date.now() - started,
+  };
+}
+
+/*
+ * ============================================================================
  * OPEN WEBSITE
  * ============================================================================
  */
@@ -848,6 +1616,18 @@ async function openWebsite({ url } = {}) {
  * ============================================================================
  */
 
+const TAB_SCOPED_TOOLS = new Set([
+  "close_tab",
+  "switch_tab",
+  "read_page",
+  "wait_for_tab",
+  "wait_for_text",
+  "get_tab_info",
+  "click_page_link",
+  "fill_login_form",
+  "fill_input",
+]);
+
 const TOOL_IMPLEMENTATIONS = Object.freeze({
   open_tab: openTab,
   close_tab: closeTab,
@@ -855,6 +1635,16 @@ const TOOL_IMPLEMENTATIONS = Object.freeze({
   list_tabs: listTabs,
   browser_search: browserSearch,
   read_page: readPage,
+  wait_for_tab: waitForTab,
+  wait_for_text: waitForText,
+  get_tab_info: getTabInfo,
+  click_page_link: clickPageLink,
+  fill_login_form: fillLoginForm,
+  fill_input: fillInput,
+  save_memory: saveMemory,
+  get_memory: getMemory,
+  forget_memory: forgetMemory,
+  list_saved_sites: listSavedSites,
   calculator: calculate,
   get_time: getTime,
   get_date: getDate,
@@ -872,6 +1662,7 @@ export class FridayToolManager {
   constructor({ onToolStart, onToolEnd } = {}) {
     this.onToolStart = onToolStart;
     this.onToolEnd = onToolEnd;
+    this.lastTabId = null;
   }
 
   has(name) {
@@ -880,19 +1671,36 @@ export class FridayToolManager {
 
   async execute(name, args = {}) {
     const toolName = String(name || "").trim();
-
     const tool = TOOL_IMPLEMENTATIONS[toolName];
 
     if (!tool) {
       throw new Error(`Friday does not have a tool named "${toolName}".`);
     }
 
-    await this.onToolStart?.(toolName, args);
+    // If the model didn't specify a tab, default to the last tab Friday
+    // actually worked with - not chrome.tabs' "active tab", which may be
+    // Friday's own New Tab page if the user just typed in chat.
+    const callArgs =
+      TAB_SCOPED_TOOLS.has(toolName) &&
+      !Number.isInteger(Number(args?.tabId)) &&
+      Number.isInteger(this.lastTabId)
+        ? { ...args, tabId: this.lastTabId }
+        : args;
+
+    await this.onToolStart?.(toolName, callArgs);
 
     const startedAt = performance.now();
 
     try {
-      const result = await tool(args);
+      const result = await tool(callArgs);
+
+      if (toolName === "close_tab") {
+        if (result?.success && result.tabId === this.lastTabId) {
+          this.lastTabId = null;
+        }
+      } else if (Number.isInteger(result?.tabId)) {
+        this.lastTabId = result.tabId;
+      }
 
       await this.onToolEnd?.(
         toolName,
@@ -906,10 +1714,7 @@ export class FridayToolManager {
 
       await this.onToolEnd?.(
         toolName,
-        {
-          success: false,
-          error: message,
-        },
+        { success: false, error: message },
         Math.round(performance.now() - startedAt),
       );
 
